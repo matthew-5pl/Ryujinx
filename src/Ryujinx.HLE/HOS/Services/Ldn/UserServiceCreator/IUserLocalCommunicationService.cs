@@ -23,9 +23,6 @@ namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
 {
     class IUserLocalCommunicationService : IpcService, IDisposable
     {
-        public static string DefaultLanPlayHost = "ryuldn.vudjun.com";
-        public static short LanPlayPort = 30456;
-
         public INetworkClient NetworkClient { get; private set; }
 
         private const int NifmRequestID = 90;
@@ -65,7 +62,7 @@ namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
             // TODO: Call nn::arp::GetApplicationControlProperty here when implemented.
             ApplicationControlProperty controlProperty = context.Device.Processes.ActiveApplication.ApplicationControlProperties;
 
-            foreach (var localCommunicationId in controlProperty.LocalCommunicationId.ItemsRo)
+            foreach (ulong localCommunicationId in controlProperty.LocalCommunicationId.ItemsRo)
             {
                 if (localCommunicationId == localCommunicationIdChecked)
                 {
@@ -163,7 +160,7 @@ namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
             }
             else
             {
-                return Array.Empty<NodeLatestUpdate>();
+                return [];
             }
         }
 
@@ -444,7 +441,7 @@ namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
 
         private ResultCode ScanInternal(IVirtualMemoryManager memory, ushort channel, ScanFilter scanFilter, ulong bufferPosition, ulong bufferSize, out ulong counter)
         {
-            ulong networkInfoSize = (ulong)Marshal.SizeOf(typeof(NetworkInfo));
+            ulong networkInfoSize = (ulong)Marshal.SizeOf<NetworkInfo>();
             ulong maxGames = bufferSize / networkInfoSize;
 
             MemoryHelper.FillWithZeros(memory, bufferPosition, (int)bufferSize);
@@ -1092,20 +1089,18 @@ namespace Ryujinx.HLE.HOS.Services.Ldn.UserServiceCreator
                             case MultiplayerMode.LdnRyu:
                                 try
                                 {
-                                    string ldnServer = context.Device.Configuration.MultiplayerLdnServer;
-                                    if (string.IsNullOrEmpty(ldnServer))
-                                    {
-                                        ldnServer = DefaultLanPlayHost;
-                                    }
+                                    string ldnServer = context.Device.Configuration.MultiplayerLdnServer 
+                                                       ?? throw new InvalidOperationException("Cannot initialize RyuLDN with a null Multiplayer server.");
+
                                     if (!IPAddress.TryParse(ldnServer, out IPAddress ipAddress))
                                     {
                                         ipAddress = Dns.GetHostEntry(ldnServer).AddressList[0];
                                     }
-                                    NetworkClient = new LdnMasterProxyClient(ipAddress.ToString(), LanPlayPort, context.Device.Configuration);
+                                    NetworkClient = new LdnMasterProxyClient(ipAddress.ToString(), SharedConstants.LanPlayPort, context.Device.Configuration);
                                 }
                                 catch (Exception ex)
                                 {
-                                    Logger.Error?.Print(LogClass.ServiceLdn, "Could not locate LdnRyu server. Defaulting to stubbed wireless.");
+                                    Logger.Error?.Print(LogClass.ServiceLdn, "Could not locate RyuLDN server. Defaulting to stubbed wireless.");
                                     Logger.Error?.Print(LogClass.ServiceLdn, ex.Message);
                                     NetworkClient = new LdnDisabledClient();
                                 }

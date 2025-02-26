@@ -52,6 +52,11 @@ namespace ARMeilleure.Translation.Cache
             nint context,
             [MarshalAs(UnmanagedType.LPWStr)] string outOfProcessCallbackDll);
 
+        [LibraryImport("kernel32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static unsafe partial bool RtlDeleteFunctionTable(
+            ulong tableIdentifier);
+
         private static GetRuntimeFunctionCallback _getRuntimeFunctionCallback;
 
         private static int _sizeOfRuntimeFunction;
@@ -91,6 +96,23 @@ namespace ARMeilleure.Translation.Cache
             }
         }
 
+        public static void RemoveFunctionTableHandler(nint codeCachePointer)
+        {
+            ulong codeCachePtr = (ulong)codeCachePointer.ToInt64();
+
+            bool result;
+
+            unsafe
+            {
+                result = RtlDeleteFunctionTable(codeCachePtr | 3);
+            }
+
+            if (!result)
+            {
+                throw new InvalidOperationException("Failure removing function table callback.");
+            }
+        }
+
         private static unsafe RuntimeFunction* FunctionTableHandler(ulong controlPc, nint context)
         {
             int offset = (int)((long)controlPc - context.ToInt64());
@@ -100,13 +122,13 @@ namespace ARMeilleure.Translation.Cache
                 return null; // Not found.
             }
 
-            var unwindInfo = funcEntry.UnwindInfo;
+            CodeGen.Unwinding.UnwindInfo unwindInfo = funcEntry.UnwindInfo;
 
             int codeIndex = 0;
 
             for (int index = unwindInfo.PushEntries.Length - 1; index >= 0; index--)
             {
-                var entry = unwindInfo.PushEntries[index];
+                UnwindPushEntry entry = unwindInfo.PushEntries[index];
 
                 switch (entry.PseudoOp)
                 {

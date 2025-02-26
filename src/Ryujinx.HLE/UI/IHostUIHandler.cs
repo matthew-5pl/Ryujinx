@@ -1,4 +1,5 @@
 using Ryujinx.HLE.HOS.Applets;
+using Ryujinx.HLE.HOS.Services.Account.Acc;
 using Ryujinx.HLE.HOS.Services.Am.AppletOE.ApplicationProxyService.ApplicationProxy.Types;
 
 namespace Ryujinx.HLE.UI
@@ -44,10 +45,12 @@ namespace Ryujinx.HLE.UI
         /// <param name="value">The value associated to the <paramref name="kind"/>.</param>
         void ExecuteProgram(Switch device, ProgramSpecifyKind kind, ulong value);
 
+        /// <summary>
         /// Displays a Message Dialog box specific to Error Applet and blocks until it is closed.
         /// </summary>
         /// <returns>False when OK is pressed, True when another button (Details) is pressed.</returns>
-        bool DisplayErrorAppletDialog(string title, string message, string[] buttonsText);
+        // ReSharper disable once UnusedParameter.Global
+        bool DisplayErrorAppletDialog(string title, string message, string[] buttonsText, (uint Module, uint Description)? errorCode = null);
 
         /// <summary>
         /// Creates a handler to process keyboard inputs into text strings.
@@ -59,5 +62,11 @@ namespace Ryujinx.HLE.UI
         /// Gets fonts and colors used by the host.
         /// </summary>
         IHostUITheme HostUITheme { get; }
+        
+        
+        /// <summary>
+        /// Displays the player select dialog and returns the selected profile.
+        /// </summary>
+        UserProfile ShowPlayerSelectDialog();
     }
 }

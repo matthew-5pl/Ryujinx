@@ -5,12 +5,13 @@ using ICSharpCode.SharpZipLib.GZip;
 using ICSharpCode.SharpZipLib.Tar;
 using ICSharpCode.SharpZipLib.Zip;
 using Ryujinx.Ava.Common.Locale;
+using Ryujinx.Ava.Common.Models.Github;
 using Ryujinx.Ava.UI.Helpers;
+using Ryujinx.Ava.Utilities;
 using Ryujinx.Common;
+using Ryujinx.Common.Helper;
 using Ryujinx.Common.Logging;
 using Ryujinx.Common.Utilities;
-using Ryujinx.UI.Common.Helper;
-using Ryujinx.UI.Common.Models.Github;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -42,7 +43,10 @@ namespace Ryujinx.Ava
         private const int ConnectionCount = 4;
 
         private static string _buildVer;
-        private static string _platformExt;
+        
+
+        private static readonly string _platformExt = BuildPlatformExtension();
+        
         private static string _buildUrl;
         private static long _buildSize;
         private static bool _updateSuccessful;
@@ -50,33 +54,11 @@ namespace Ryujinx.Ava
 
         private static readonly string[] _windowsDependencyDirs = [];
 
-        public static async Task BeginUpdateAsync(bool showVersionUpToDate = false)
+        public static async Task<Optional<(Version Current, Version Incoming)>> CheckVersionAsync(bool showVersionUpToDate = false)
         {
-            if (_running)
-            {
-                return;
-            }
-
-            _running = true;
-
-            // Detect current platform
-            if (OperatingSystem.IsMacOS())
-            {
-                _platformExt = "macos_universal.app.tar.gz";
-            }
-            else if (OperatingSystem.IsWindows())
-            {
-                _platformExt = "win_x64.zip";
-            }
-            else if (OperatingSystem.IsLinux())
-            {
-                var arch = RuntimeInformation.OSArchitecture == Architecture.Arm64 ? "arm64" : "x64";
-                _platformExt = $"linux_{arch}.tar.gz";
-            }
-
             if (!Version.TryParse(Program.Version, out Version currentVersion))
             {
-                Logger.Error?.Print(LogClass.Application, $"Failed to convert the current {App.FullAppName} version!");
+                Logger.Error?.Print(LogClass.Application, $"Failed to convert the current {RyujinxApp.FullAppName} version!");
 
                 await ContentDialogHelper.CreateWarningDialog(
                     LocaleManager.Instance[LocaleKeys.DialogUpdaterConvertFailedMessage],
@@ -84,8 +66,10 @@ namespace Ryujinx.Ava
 
                 _running = false;
 
-                return;
+                return default;
             }
+            
+            Logger.Info?.Print(LogClass.Application, "Checking for updates.");
 
             // Get latest version number from GitHub API
             try
@@ -93,10 +77,10 @@ namespace Ryujinx.Ava
                 using HttpClient jsonClient = ConstructHttpClient();
                 
                 string fetchedJson = await jsonClient.GetStringAsync(LatestReleaseUrl);
-                var fetched = JsonHelper.Deserialize(fetchedJson, _serializerContext.GithubReleasesJsonResponse);
+                GithubReleasesJsonResponse fetched = JsonHelper.Deserialize(fetchedJson, _serializerContext.GithubReleasesJsonResponse);
                 _buildVer = fetched.TagName;
 
-                foreach (var asset in fetched.Assets)
+                foreach (GithubReleaseAssetJsonResponse asset in fetched.Assets)
                 {
                     if (asset.Name.StartsWith("ryujinx") && asset.Name.EndsWith(_platformExt))
                     {
@@ -115,10 +99,12 @@ namespace Ryujinx.Ava
                                     OpenHelper.OpenUrl(ReleaseInformation.GetChangelogForVersion(currentVersion));
                                 }
                             }
+                            
+                            Logger.Info?.Print(LogClass.Application, "Up to date.");
 
                             _running = false;
 
-                            return;
+                            return default;
                         }
 
                         break;
@@ -139,10 +125,12 @@ namespace Ryujinx.Ava
                             OpenHelper.OpenUrl(ReleaseInformation.GetChangelogForVersion(currentVersion));
                         }
                     }
+                    
+                    Logger.Info?.Print(LogClass.Application, "Up to date.");
 
                     _running = false;
 
-                    return;
+                    return default;
                 }
             }
             catch (Exception exception)
@@ -154,12 +142,12 @@ namespace Ryujinx.Ava
 
                 _running = false;
 
-                return;
+                return default;
             }
 
             if (!Version.TryParse(_buildVer, out Version newVersion))
             {
-                Logger.Error?.Print(LogClass.Application, $"Failed to convert the received {App.FullAppName} version from GitHub!");
+                Logger.Error?.Print(LogClass.Application, $"Failed to convert the received {RyujinxApp.FullAppName} version from GitHub!");
 
                 await ContentDialogHelper.CreateWarningDialog(
                     LocaleManager.Instance[LocaleKeys.DialogUpdaterConvertFailedGithubMessage],
@@ -167,8 +155,26 @@ namespace Ryujinx.Ava
 
                 _running = false;
 
+                return default;
+            }
+
+            return (currentVersion, newVersion);
+        }
+        
+        public static async Task BeginUpdateAsync(bool showVersionUpToDate = false)
+        {
+            if (_running)
+            {
                 return;
             }
+
+            _running = true;
+
+            Optional<(Version, Version)> versionTuple = await CheckVersionAsync(showVersionUpToDate);
+
+            if (_running is false || !versionTuple.HasValue) return;
+
+            (Version currentVersion, Version newVersion) = versionTuple.Value;
 
             if (newVersion <= currentVersion)
             {
@@ -183,6 +189,8 @@ namespace Ryujinx.Ava
                         OpenHelper.OpenUrl(ReleaseInformation.GetChangelogForVersion(currentVersion));
                     }
                 }
+                
+                Logger.Info?.Print(LogClass.Application, "Up to date.");
 
                 _running = false;
 
@@ -212,6 +220,8 @@ namespace Ryujinx.Ava
                 string newVersionString = ReleaseInformation.IsCanaryBuild
                     ? $"Canary {currentVersion} -> Canary {newVersion}"
                     : $"{currentVersion} -> {newVersion}";
+                
+                Logger.Info?.Print(LogClass.Application, $"Version found: {newVersionString}");
                 
             RequestUserToUpdate:
                 // Show a message asking the user if they want to update
@@ -266,7 +276,7 @@ namespace Ryujinx.Ava
                 SubHeader = LocaleManager.Instance[LocaleKeys.UpdaterDownloading],
                 IconSource = new SymbolIconSource { Symbol = Symbol.Download },
                 ShowProgressBar = true,
-                XamlRoot = App.MainWindow,
+                XamlRoot = RyujinxApp.MainWindow,
             };
 
             taskDialog.Opened += (s, e) =>
@@ -361,7 +371,7 @@ namespace Ryujinx.Ava
 
             for (int i = 0; i < ConnectionCount; i++)
             {
-                list.Add(Array.Empty<byte>());
+                list.Add([]);
             }
 
             for (int i = 0; i < ConnectionCount; i++)
@@ -423,7 +433,8 @@ namespace Ryujinx.Ava
                         // On macOS, ensure that we remove the quarantine bit to prevent Gatekeeper from blocking execution.
                         if (OperatingSystem.IsMacOS())
                         {
-                            using Process xattrProcess = Process.Start("xattr", new List<string> { "-d", "com.apple.quarantine", updateFile });
+                            using Process xattrProcess = Process.Start("xattr", 
+                                [ "-d", "com.apple.quarantine", updateFile ]);
 
                             xattrProcess.WaitForExit();
                         }
@@ -490,7 +501,7 @@ namespace Ryujinx.Ava
                 bytesWritten += readSize;
 
                 taskDialog.SetProgressBarState(GetPercentage(bytesWritten, totalBytes), TaskDialogProgressState.Normal);
-                App.SetTaskbarProgressValue(bytesWritten, totalBytes);
+                RyujinxApp.SetTaskbarProgressValue(bytesWritten, totalBytes);
 
                 updateFileStream.Write(buffer, 0, readSize);
             }
@@ -686,22 +697,11 @@ namespace Ryujinx.Ava
 #else
             if (showWarnings)
             {
-                if (ReleaseInformation.IsFlatHubBuild)
-                {
-                    Dispatcher.UIThread.InvokeAsync(() =>
-                        ContentDialogHelper.CreateWarningDialog(
-                            LocaleManager.Instance[LocaleKeys.UpdaterDisabledWarningTitle],
-                            LocaleManager.Instance[LocaleKeys.DialogUpdaterFlatpakNotSupportedMessage])
+                Dispatcher.UIThread.InvokeAsync(() =>
+                    ContentDialogHelper.CreateWarningDialog(
+                        LocaleManager.Instance[LocaleKeys.UpdaterDisabledWarningTitle],
+                        LocaleManager.Instance[LocaleKeys.DialogUpdaterDirtyBuildSubMessage])
                     );
-                }
-                else
-                {
-                    Dispatcher.UIThread.InvokeAsync(() =>
-                        ContentDialogHelper.CreateWarningDialog(
-                            LocaleManager.Instance[LocaleKeys.UpdaterDisabledWarningTitle],
-                            LocaleManager.Instance[LocaleKeys.DialogUpdaterDirtyBuildSubMessage])
-                    );
-                }
             }
 
             return false;
@@ -711,15 +711,15 @@ namespace Ryujinx.Ava
         // NOTE: This method should always reflect the latest build layout.
         private static IEnumerable<string> EnumerateFilesToDelete()
         {
-            var files = Directory.EnumerateFiles(_homeDir); // All files directly in base dir.
+            IEnumerable<string> files = Directory.EnumerateFiles(_homeDir); // All files directly in base dir.
 
             // Determine and exclude user files only when the updater is running, not when cleaning old files
             if (_running && !OperatingSystem.IsMacOS())
             {
                 // Compare the loose files in base directory against the loose files from the incoming update, and store foreign ones in a user list.
-                var oldFiles = Directory.EnumerateFiles(_homeDir, "*", SearchOption.TopDirectoryOnly).Select(Path.GetFileName);
-                var newFiles = Directory.EnumerateFiles(_updatePublishDir, "*", SearchOption.TopDirectoryOnly).Select(Path.GetFileName);
-                var userFiles = oldFiles.Except(newFiles).Select(filename => Path.Combine(_homeDir, filename));
+                IEnumerable<string> oldFiles = Directory.EnumerateFiles(_homeDir, "*", SearchOption.TopDirectoryOnly).Select(Path.GetFileName);
+                IEnumerable<string> newFiles = Directory.EnumerateFiles(_updatePublishDir, "*", SearchOption.TopDirectoryOnly).Select(Path.GetFileName);
+                IEnumerable<string> userFiles = oldFiles.Except(newFiles).Select(filename => Path.Combine(_homeDir, filename));
 
                 // Remove user files from the paths in files.
                 files = files.Except(userFiles);
@@ -772,5 +772,34 @@ namespace Ryujinx.Ava
         public static void CleanupUpdate() =>
             Directory.GetFiles(_homeDir, "*.ryuold", SearchOption.AllDirectories)
                 .ForEach(File.Delete);
+        
+        private static string BuildPlatformExtension()
+        {
+            if (RunningPlatform.IsMacOS)
+                return "macos_universal.app.tar.gz";
+
+#pragma warning disable CS8509 // It is exhaustive for any values this can contain.
+            string osPrefix = RunningPlatform.CurrentOS switch
+            {
+                OperatingSystemType.Linux => "linux",
+                OperatingSystemType.Windows => "win"
+            };
+
+            string archSuffix = RunningPlatform.Architecture switch
+            {
+                Architecture.Arm64 => "arm64",
+                Architecture.X64 => "x64",
+                _ => throw new PlatformNotSupportedException($"Unknown architecture {Enum.GetName(RunningPlatform.Architecture)}."),
+            };
+            
+            string fileExtension = RunningPlatform.CurrentOS switch
+#pragma warning restore CS8509
+            {
+                OperatingSystemType.Linux => "tar.gz",
+                OperatingSystemType.Windows => "zip"
+            };
+
+            return $"{osPrefix}_{archSuffix}.{fileExtension}";
+        }
     }
 }

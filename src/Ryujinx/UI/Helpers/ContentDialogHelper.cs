@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -121,7 +122,7 @@ namespace Ryujinx.Ava.UI.Helpers
 
                 startedDeferring = true;
 
-                var deferral = args.GetDeferral();
+                Deferral deferral = args.GetDeferral();
 
                 sender.PrimaryButtonClick -= DeferClose;
 
@@ -159,6 +160,7 @@ namespace Ryujinx.Ava.UI.Helpers
                 Symbol = (Symbol)symbol,
                 Margin = new Thickness(10),
                 FontSize = 40,
+                FlowDirection = FlowDirection.LeftToRight,
                 VerticalAlignment = VerticalAlignment.Center,
             };
 
@@ -383,6 +385,10 @@ namespace Ryujinx.Ava.UI.Helpers
                     Position = parent.PointToScreen(new Point()),
                     ShowInTaskbar = false,
                 };
+                
+#if DEBUG
+                _contentDialogOverlayWindow.AttachDevTools(new KeyGesture(Key.F12, KeyModifiers.Control));
+#endif
 
                 parent.PositionChanged += OverlayOnPositionChanged;
 
